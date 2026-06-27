@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GR-RouteMaster - Точна Шофьорска Версия</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f0f4f8; margin: 0; padding: 15px; color: #333; }
+        .container { max-width: 550px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #0275d8; margin-top: 5px; margin-bottom: 25px; }
+        .lang-group { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 15px; gap: 8px; }
+        .lang-select { width: auto; padding: 6px 10px; margin-bottom: 0; font-size: 14px; border: 1px solid #cbd5e1; border-radius: 6px; background-color: #fff; cursor: pointer; }
+        .input-group { background: #eff6ff; padding: 15px; margin-bottom: 20px; border-radius: 6px; border: 1px solid #bfdbfe; }
+        .section-title { font-size: 16px; font-weight: bold; color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 5px; margin-bottom: 15px; }
+        .segment { background: #fff; padding: 12px; margin-bottom: 12px; border: 1px solid #e5e7eb; border-radius: 6px; border-left: 4px solid #3b82f6; }
+        .segment h4 { margin: 0 0 8px 0; color: #1e40af; font-size: 14px; }
+        label { display: block; font-size: 13px; margin-bottom: 3px; font-weight: bold; color: #4b5563; }
+        input, select { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 15px; }
+        .calc-btn { width: 100%; padding: 15px; background-color: #0275d8; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; text-transform: uppercase; }
+        .gps-btn { width: 100%; padding: 12px; background-color: #10b981; color: white; border: none; border-radius: 6px; font-size: 15px; cursor: pointer; font-weight: bold; margin-bottom: 15px; }
+        #results { margin-top: 25px; padding: 18px; border-radius: 6px; display: block; line-height: 1.6; }
+        .success { background-color: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .warning-box { color: #991b1b; background-color: #fef2f2; border: 1px solid #fca5a5; padding: 10px; border-radius: 4px; margin-top: 12px; font-weight: bold; }
+        optgroup { font-weight: bold; color: #1e3a8a; background: #f8fafc; }
+        option { font-weight: normal; color: #333; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Избор на Език -->
+    <div class="lang-group">
+        <label id="lbl-lang" style="display:inline; margin-bottom:0; font-weight:normal; margin-right:5px;">Език / Language:</label>
+        <select id="lang-select" class="lang-select" onchange="changeLanguage()">
+            <option value="bg">Български (BG)</option>
+            <option value="en">English (EN)</option>
+            <option value="el">Ελληνικά (EL)</option>
+            <option value="ru">Русский (RU)</option>
+            <option value="ro">Română (RO)</option>
+        </select>
+    </div>
+
+    <h2 id="main-title">GR-RouteMaster</h2>
+    
+    <div class="input-group">
+        <label id="lbl-dep-time">Час на тръгване от ГКПП Маказа:</label>
+        <input type="time" id="departure-time" value="08:00" oninput="calculateGreeceTrip()">
+
+        <button type="button" class="gps-btn" id="gps-btn-text" onclick="getGPSLocation()">
+            Намери разстоянието от мен до Маказа
+        </button>
+
+        <label id="lbl-consumption">Среден разход (л / 100 км):</label>
+        <input type="number" id="fuel-consumption" value="6.5" step="0.1" oninput="calculateGreeceTrip()">
+
+        <label id="lbl-price">Цена на горивото за 1 литър (€):</label>
+        <input type="number" id="fuel-price-eur" value="1.55" step="0.01" oninput="calculateGreeceTrip()">
+    </div>
+
+    <div class="input-group" style="background-color: #f0fdf4; border-color: #bbf7d0;">
+        <label id="lbl-destination" style="color: #166534;">Избери дестинация в Гърция:</label>
+        <select id="destination-select" onchange="updateDestination()"></select>
+    </div>
+    
+    <div class="section-title" id="sec-title">Маршрут в Гърция</div>
+    <div id="gr-segments-container"></div>
+
+    <button class="calc-btn" id="calc-btn-text" onclick="calculateGreeceTrip()">Преизчисли</button>
+    <div id="results" class="success"></div>
+</div>
+
+<script>
+// === QA ДЕБЪГЕР ===
+window.onerror = function(message, source, lineno, colno, error) {
+    alert("БЪГ / BUG!\n\nГрешка: " + message + "\nРед: " + lineno);
+    return false;
+};
+
+const translations = {
+    bg: {
+        title: "GR-RouteMaster",
+        lblLang: "Език:",
+        lblDepTime: "Час на тръгване от ГКПП Маказа:",
+        gpsBtn: "Намери разстоянието от мен до Маказа",
+        gpsStart: "Сензорът се стартира... Моля, потвърдете споделянето на локация.",
+        gpsNoSupport: "Вашият браузър не поддържа GPS локализация.",
+        gpsSuccess: "🎯 Локализацията успя!\n\nРазстояние по въздух: ~34 км.\nРеално разстояние с КОЛА през планинския път до ГКПП Маказа: ",
+        gpsErr: "Грешка при локализация: ",
+        lblConsumption: "Среден разход (л / 100 км):",
+        lblPrice: "Цена на горивото за 1 литър (€):",
+        lblDestination: "Избери крайна дестинация:",
+        secTitle: "Маршрут в Гърция",
+        btnText: "Преизчисли",
+        lblDist: "Разстояние (км):",
+        lblSpeed: "Твоята Скорост (км/ч):",
+        lblLimit: "Ограничение",
+        resTitle: "Отчет за пътуването в Гърция:",
+        resArrival: "Очаквано пристигане:",
+        resDist: "Общо разстояние в Гърция:",
+        resTime: "Чисто време в път:",
+        resFuel: "Гориво за гръцката отсечка:",
+        resPrice: "Цена за гориво:",
+        hoursStr: "ч.",
+        minStr: "мин.",
+        warning: "Внимание: Скоростта ви надвишава ограниченията в Гърция! Глобите са изключително високи!",
+        segMakaza: "ГКПП Маказа - Комотини (Скоростен път)",
+        segHighway: "Магистрала Егнатия Одос",
+        segLocal: "Регионална пътна мрежа до крайна цел",
+        g1: "Близки плажове (Тракия)", g2: "Кавала и района", g3: "Остров Тасос (след ферибота)", g4: "Залив Стримоникос", g5: "Халкидики", g6: "Големи градове и Южна Гърция"
+    },
+    en: {
+        title: "GR-RouteMaster",
+        lblLang: "Language:",
+        lblDepTime: "Departure time from Makaza Border Crossing:",
+        gpsBtn: "Find distance from me to Makaza",
+        gpsStart: "Starting sensor... Please confirm location sharing.",
+        gpsNoSupport: "Your browser does not support GPS localization.",
+        gpsSuccess: "🎯 Localization successful!\n\nAir distance: ~34 km.\nReal road distance by CAR to Makaza Border: ",
+        gpsErr: "Localization error: ",
+        lblConsumption: "Average consumption (l / 100 km):",
+        lblPrice: "Fuel price for 1 liter (€):",
+        lblDestination: "Choose final destination:",
+        secTitle: "Route in Greece",
+        btnText: "Recalculate",
+        lblDist: "Distance (km):",
+        lblSpeed: "Your Speed (km/h):",
+        lblLimit: "Limit",
+        resTitle: "Greece Trip Report:",
+        resArrival: "Estimated arrival:",
+        resDist: "Total distance in Greece:",
+        resTime: "Pure driving time:",
+        resFuel: "Fuel for the Greek section:",
+        resPrice: "Fuel cost:",
+        hoursStr: "h.",
+        minStr: "min.",
+        warning: "Warning: Your speed exceeds the limits in Greece! Fines are extremely high!",
+        segMakaza: "Makaza Border - Komotini (Expressway)",
+        segHighway: "Egnatia Odos Highway",
+        segLocal: "Local road network to destination",
+        g1: "Nearby beaches (Thrace)", g2: "Kavala and region", g3: "Thassos Island (after ferry)", g4: "Strymonikos Gulf", g5: "Halkidiki", g6: "Large cities & South Greece"
+    },
+    el: {
+        title: "GR-RouteMaster",
+        lblLang: "Γλώσσα:",
+        lblDepTime: "Ώρα αναχώρησης από Συνοριακό Σταθμό Μακάζα:",
+        gpsBtn: "Βρες την απόσταση από εμένα έως τη Μακάζα",
+        gpsStart: "Εκκίνηση αισθητήρα... Παρακαλώ επιβεβαιώστε την κοινή χρήση τοποθεσίας.",
+        gpsNoSupport: "Ο περιηγητής σας δεν υποστηρίζει εντοπισμό GPS.",
+        gpsSuccess: "🎯 Επιτυχής εντοπισμός!\n\nΑπόσταση σε ευθεία γραμμή: ~34 χλμ.\nΠραγματική οδική απόσταση με ΑΥΤΟΚΙΝΗΤΟ έως τη Μακάζα: ",
+        gpsErr: "Σφάλμα εντοπισμού: ",
+        lblConsumption: "Μέση κατανάλωση (λ / 100 χλμ):",
+        lblPrice: "Τιμή καυσίμου ανά 1 λίτρο (€):",
+        lblDestination: "Επιλέξτε τελικό προορισμό:",
+        secTitle: "Διαδρομή στην Ελλάδα",
+        btnText: "Επανυπολογισμός",
+        lblDist: "Απόσταση (χλμ):",
+        lblSpeed: "Η ταχύτητά σας (χλμ/ώρα):",
+        lblLimit: "Όριο",
+        resTitle: "Αναφορά Ταξιδιού στην Ελλάδα:",
+        resArrival: "Εκτιμώμενη άφιξη:",
+        resDist: "Συνολική απόσταση στην Ελλάδα:",
+        resTime: "Καθαρός χρόνος οδήγησης:",
+        resFuel: "Καύσιμα για το ελληνικό τμήμα:",
+        resPrice: "Κόστος καυσίμων:",
+        hoursStr: "ώ.",
+        minStr: "λεπ.",
+        warning: "Προσοχή: Η ταχύτητά σας υπερβαίνει τα όρια στην Ελλάδα! Τα πρόστιμα είναι εξαιρετικά υψηλά!",
+        segMakaza: "Συνοριακό Σταθμό Μακάζα - Κομοτηνή (Ταχείας Κυκλοφορίας)",
+        segHighway: "Εγνατία Οδός",
+        segLocal: "Τοπικό οδικό δίκτυο προς τον προορισμό",
+        g1: "Κοντινές παραλίες (Θράκη)", g2: "Καβάλα και περιοχή", g3: "Θάσος (μετά το φέρι)", g4: "Στρυμονικός Κόλπος", g5: "Χαλκιδική", g6: "Μεγάλες πόλεις & Νότια Ελλάδα"
+    },
+    ru: {
+        title: "GR-RouteMaster",
+        lblLang: "Язык:",
+        lblDepTime: "Время отправления от КПП Маказа:",
+        gpsBtn: "Найти расстояние от меня до Маказы",
+        gpsStart: "Запуск датчика... Пожалуйста, подтвердите доступ к геопозиции.",
+        gpsNoSupport: "Ваш браузер не поддерживает GPS локализацию.",
+        gpsSuccess: "🎯 Геолокация успешна!\n\nРасстояние по воздуху: ~34 км.\nРеальное расстояние на АВТОМОБИЛЕ до КПП Маказа: ",
+        gpsErr: "Ошибка локализации: ",
+        lblConsumption: "Средний расход (л / 100 км):",
+        lblPrice: "Цена топлива за 1 литр (€):",
+        lblDestination: "Выберите пункт назначения:",
+        secTitle: "Маршрут по Греции",
+        btnText: "Пересчитать",
+        lblDist: "Расстояние (км):",
+        lblSpeed: "Ваша скорость (км/ч):",
+        lblLimit: "Ограничение",
+        resTitle: "Отчет о поездке по Греции:",
+        resArrival: "Ожидаемое прибытие:",
+        resDist: "Общее расстояние в Греции:",
+        resTime: "Чистое время в пути:",
+        resFuel: "Топливо на греческий отрезок:",
+        resPrice: "Стоимость топлива:",
+        hoursStr: "ч.",
+        minStr: "мин.",
+        warning: "Внимание: Ваша скорость превышает ограничения в Греции! Штрафы крайне высоки!",
+        segMakaza: "КПП Маказа - Комотини (Скоростное шоссе)",
+        segHighway: "Автомагистраль Эгнатия Одос",
+        segLocal: "Местная дорожная сеть до конечной цели",
+        g1: "Ближайшие пляжи (Фракия)", g2: "Кавала и район", g3: "Остров Тасос (после парома)", g4: "Залив Стримоникос", g5: "Халкидики", g6: "Крупные города и Южная Греция"
+    },
+    ro: {
+        title: "GR-RouteMaster",
+        lblLang: "Limbă:",
+        lblDepTime: "Ora de plecare de la vama Makaza:",
+        gpsBtn: "Află distanța de la mine până la Makaza",
+        gpsStart: "Se pornește senzorul... Vă rugăm să acceptați partajarea locației.",
+        gpsNoSupport: "Browserul dvs. nu acceptă localizarea GPS.",
+        gpsSuccess: "🎯 Localizare reușită!\n\nDistanța în aer: ~34 km.\nDistanța reală cu MAȘINA până la vama Makaza: ",
+        gpsErr: "Eroare de localizare: ",
+        lblConsumption: "Consum mediu (l / 100 km):",
+        lblPrice: "Preț combustibil pentru 1 litru (€):",
+        lblDestination: "Alegeți destinația finală:",
+        secTitle: "Traseu în Grecia",
+        btnText: "Recalculează",
+        lblDist: "Distanță (km):",
+        lblSpeed: "Viteza ta (km/h):",
+        lblLimit: "Limită",
+        resTitle: "Raportul călătoriei în Grecia:",
+        resArrival: "Sosire estimată:",
+        resDist: "Distanța totală în Grecia:",
+        resTime: "Timp curat de condus:",
+        resFuel: "Combustibil pentru segmentul grec:",
+        resPrice: "Cost combustibil:",
+        hoursStr: "h.",
+        minStr: "min.",
+        warning: "Atenție: Viteza dvs. depășește limitele din Grecia! Amenzile sunt extrem de mari!",
+        segMakaza: "Vama Makaza - Komotini (Drum expres)",
+        segHighway: "Autostrada Egnatia Odos",
+        segLocal: "Rețeaua rutieră locală către destinație",
+        g1: "Plaje în apropiere (Tracia)", g2: "Kavala și regiunea", g3: "Insula Thassos (după feribot)", g4: "Golful Strymonikos", g5: "Halkidiki", g6: "Orașe mari și Grecia de Sud"
+    }
+};
+
+const destinationsDatabase = {
+    g1: {
+        arogi: { bg: "Плаж Ароги / Фанари", en: "Arogi / Fanari Beach", el: "Παραλία Αρωγή / Φανάρι", ru: "Пляж Ароги / Фанари", ro: "Plaja Arogi / Fanari", hasHighway: false, highwayDist: 0, localDist: 51, localSpeed: 70, localAllowed: 70 },
+        maroneia: { bg: "Маронея (Плаж Платанитос)", en: "Maroneia (Platanitos Beach)", el: "Μαρώνεια (Παραλία Πλατανίτος)", ru: "Маронея (Пляж Платанитос)", ro: "Maroneia (Plaja Platanitos)", hasHighway: false, highwayDist: 0, localDist: 46, localSpeed: 65, localAllowed: 80 },
+        alexandroupoli: { bg: "Александруполис (Център)", en: "Alexandroupoli (Center)", el: "Αλεξανδρούπολη (Κέντρο)", ru: "Александруполис (Центр)", ro: "Alexandroupoli (Centru)", hasHighway: true, highwayDist: 51.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 6, localSpeed: 50, localAllowed: 50 },
+        makri: { bg: "Плаж Макри / Дикела", en: "Makri / Dikella Beach", el: "Παραλία Μάκρη / Δίκελλα", ru: "Пляж Макри / Дикела", ro: "Plaja Makri / Dikella", hasHighway: true, highwayDist: 43.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 11, localSpeed: 60, localAllowed: 80 }
+    },
+    g2: {
+        kavala: { bg: "Кавала (Център)", en: "Kavala (Center)", el: "Καβάλα (Κέντρο)", ru: "Кавала (Центр)", ro: "Kavala (Centru)", hasHighway: true, highwayDist: 81.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 7, localSpeed: 50, localAllowed: 50 },
+        palio: { bg: "Палио", en: "Palio", el: "Παληό", ru: "Палио", ro: "Palio", hasHighway: true, highwayDist: 81.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 14, localSpeed: 55, localAllowed: 60 },
+        iraklica: { bg: "Неа Ираклица", en: "Nea Iraklitsa", el: "Νέα Ηρακλίτσα", ru: "Неа Ираклица", ro: "Nea Iraklitsa", hasHighway: true, highwayDist: 89.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 11, localSpeed: 60, localAllowed: 60 },
+        peramos: { bg: "Неа Перемос (Плаж Амолофи)", en: "Nea Peramos (Amolofi Beach)", el: "Νέα Πέραμος (Παραλία Αμμόλοφοι)", ru: "Неа Перамос (Пляж Амолофи)", ro: "Nea Peramos (Plaja Amolofi)", hasHighway: true, highwayDist: 89.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 17, localSpeed: 55, localAllowed: 70 },
+        keramoti: { bg: "Керамоти (Порт за о. Тасос)", en: "Keramoti (Port to Thassos)", el: "Κεραμωτή (Λιμάνι για Θάσο)", ru: "Керамоти (Порт на о. Тасос)", ro: "Keramoti (Port pentru Thassos)", hasHighway: true, highwayDist: 58.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 21, localSpeed: 75, localAllowed: 90 }
+    },
+    g3: {
+        limenas: { bg: "о. Тасос - Лименас (Порт/Град)", en: "Thassos - Limenas (Port)", el: "Θάσος - Λιμένας (Λιμάνι)", ru: "о. Тасос - Лименас (Порт)", ro: "Insula Thassos - Limenas (Port)", hasHighway: true, highwayDist: 58.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 22, localSpeed: 50, localAllowed: 50 },
+        potos: { bg: "о. Тасос - Потос / Лименария", en: "Thassos - Potos / Limenaria", el: "Θάσος - Ποτός / Λιμενάρια", ru: "о. Тасос - Потос / Лименария", ro: "Insula Thassos - Potos / Limenaria", hasHighway: true, highwayDist: 58.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 65, localSpeed: 50, localAllowed: 60 },
+        golden_beach: { bg: "о. Тасос - Голдън Бийч", en: "Thassos - Golden Beach", el: "Θάσος - Χρυσή Αμμουδιά", ru: "о. Тасос - Голден Бич", ro: "Insula Thassos - Golden Beach", hasHighway: true, highwayDist: 58.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 34, localSpeed: 45, localAllowed: 50 }
+    },
+    g4: {
+        asprovalta: { bg: "Аспровалта", en: "Asprovalta", el: "Ασπροβάλτα", ru: "Аспровалта", ro: "Asprovalta", hasHighway: true, highwayDist: 166.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 6, localSpeed: 50, localAllowed: 60 },
+        vrasna: { bg: "Неа Врасна", en: "Nea Vrasna", el: "Νέα Βρασνά", ru: "Неа Врасна", ro: "Nea Vrasna", hasHighway: true, highwayDist: 166.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 5, localSpeed: 50, localAllowed: 60 },
+        stavros: { bg: "Ставрос", en: "Stavros", el: "Σταυρός", ru: "Ставрос", ro: "Stavros", hasHighway: true, highwayDist: 166.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 11, localSpeed: 55, localAllowed: 70 }
+    },
+    g5: {
+        ierissos: { bg: "Йерисос (Атон)", en: "Ierissos (Athos)", el: "Ιερισσός (Άθως)", ru: "Иериссос (Афон)", ro: "Ierissos (Athos)", hasHighway: true, highwayDist: 166.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 69, localSpeed: 65, localAllowed: 80 },
+        nikiti: { bg: "Никити (Ситония)", en: "Nikiti (Sithonia)", el: "Νικήτη (Σιθωνία)", ru: "Никити (Ситония)", ro: "Nikiti (Sithonia)", hasHighway: true, highwayDist: 211.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 44, localSpeed: 60, localAllowed: 80 },
+        neos_marmaras: { bg: "Неос Мармарас (Ситония)", en: "Neos Marmaras (Sithonia)", el: "Νέος Μαρμαράς (Σιθωνία)", ru: "Неос Мармарас (Ситония)", ro: "Neos Marmaras (Sithonia)", hasHighway: true, highwayDist: 211.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 64, localSpeed: 55, localAllowed: 70 },
+        kallithea: { bg: "Калитея (Касандра)", en: "Kallithea (Kassandra)", el: "Καλλιθέα (Κασσάνδρα)", ru: "Каллитея (Кассандра)", ro: "Kallithea (Kassandra)", hasHighway: true, highwayDist: 229.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 49, localSpeed: 70, localAllowed: 90 }
+    },
+    g6: {
+        thessaloniki: { bg: "Солун (Център)", en: "Thessaloniki (Center)", el: "Θεσσαλονίκη (Κέντρο)", ru: "Салоники (Центр)", ro: "Salonic (Centru)", hasHighway: true, highwayDist: 241.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 14, localSpeed: 50, localAllowed: 60 },
+        katerini: { bg: "Катерини (Паралия)", en: "Katerini (Paralia)", el: "Κατερίνη (Παραλία)", ru: "Катерини (Паралия)", ro: "Katerini (Paralia)", hasHighway: true, highwayDist: 309.5, highwaySpeed: 120, highwayAllowed: 130, localDist: 11, localSpeed: 60, localAllowed: 70 }
+    }
+};
+
+let currentLang = 'bg';
+let selectedDestKey = 'arogi';
+
+function findDestination(key) {
+    for (let group in destinationsDatabase) {
+        if (destinationsDatabase[group][key]) {
+            return destinationsDatabase[group][key];
+        }
+    }
+    return null;
+}
+
+function getGPSLocation() {
+    const t = translations[currentLang];
+    if (!navigator.geolocation) {
+        alert(t.gpsNoSupport);
+        return;
+    }
+    alert(t.gpsStart);
+    navigator.geolocation.getCurrentPosition(
+        function(position) {
+            const distanceRoad = 71;
+            alert(t.gpsSuccess + distanceRoad + " км.");
+        },
+        function(error) {
+            alert(t.gpsErr + error.message);
+        }
+    );
+}
+
+function changeLanguage() {
+    const langSelect = document.getElementById("lang-select");
+    if (!langSelect) return;
+    currentLang = langSelect.value;
+    
+    // Смяна на статичните текстове
+    const t = translations[currentLang];
+    document.getElementById("lbl-lang").innerText = t.lblLang;
+    document.getElementById("lbl-dep-time").innerText = t.lblDepTime;
+    document.getElementById("gps-btn-text").innerText = t.gpsBtn;
+    document.getElementById("lbl-consumption").innerText = t.lblConsumption;
+    document.getElementById("lbl-price").innerText = t.lblPrice;
+    document.getElementById("lbl-destination").innerText = t.lblDestination;
+    document.getElementById("sec-title").innerText = t.secTitle;
+    document.getElementById("calc-btn-text").innerText = t.btnText;
+
+    // Презареждане на базата и интерфейса
+    populateDestinations();
+    buildSegmentInputs();
+    calculateGreeceTrip();
+}
+
+function populateDestinations() {
+    const select = document.getElementById("destination-select");
+    if (!select) return;
+    select.innerHTML = "";
+    
+    const t = translations[currentLang];
+    
+    for (let group in destinationsDatabase) {
+        let optGroup = document.createElement("optgroup");
+        optGroup.label = t[group] || group; 
+        
+        for (let key in destinationsDatabase[group]) {
+            let opt = document.createElement("option");
+            opt.value = key;
+            opt.innerText = destinationsDatabase[group][key][currentLang];
+            if (key === selectedDestKey) opt.selected = true;
+            optGroup.appendChild(opt);
+        }
+        select.appendChild(optGroup);
+    }
+}
+
+function updateDestination() {
+    const select = document.getElementById("destination-select");
+    if (!select) return;
+    selectedDestKey = select.value;
+    buildSegmentInputs();
+    calculateGreeceTrip();
+}
+
+function buildSegmentInputs() {
+    const container = document.getElementById("gr-segments-container");
+    if (!container) return;
+    const t = translations[currentLang];
+    const dest = findDestination(selectedDestKey);
+    if (!dest) return;
+
+    let html = `
+        <div class="segment">
+            <h4>📍 ${t.segMakaza} (${t.lblLimit}: 90)</h4>
+            <label>${t.lblDist}</label>
+            <input type="number" id="gr_makaza-dist" value="24.5" step="0.1" oninput="calculateGreeceTrip()">
+            <label>${t.lblSpeed}</label>
+            <input type="number" id="gr_makaza-speed" value="80" oninput="calculateGreeceTrip()">
+        </div>
+    `;
+
+    if (dest.hasHighway) {
+        html += `
+            <div class="segment" style="border-left-color: #eab308;">
+                <h4>🛣️ ${t.segHighway} (${t.lblLimit}: ${dest.highwayAllowed})</h4>
+                <label>${t.lblDist}</label>
+                <input type="number" id="gr_highway-dist" value="${dest.highwayDist}" step="0.1" oninput="calculateGreeceTrip()">
+                <label>${t.lblSpeed}</label>
+                <input type="number" id="gr_highway-speed" value="${dest.highwaySpeed}" oninput="calculateGreeceTrip()">
+            </div>
+        `;
+    }
+
+    html += `
+        <div class="segment" style="border-left-color: #10b981;">
+            <h4>📍 ${t.segLocal} ➔ ${dest[currentLang]} (${t.lblLimit}: ${dest.localAllowed})</h4>
+            <label>${t.lblDist}</label>
+            <input type="number" id="gr_local-dist" value="${dest.localDist}" step="0.1" oninput="calculateGreeceTrip()">
+            <label>${t.lblSpeed}</label>
+            <input type="number" id="gr_local-speed" value="${dest.localSpeed}" oninput="calculateGreeceTrip()">
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+function addMinutesToTime(baseHours, baseMinutes, addedMinutes) {
+    let totalMin = baseMinutes + Math.round(addedMinutes);
+    let totalHr = baseHours + Math.floor(totalMin / 60);
+    totalMin = totalMin % 60;
+    totalHr = totalHr % 24;
+    return `${String(totalHr).padStart(2, '0')}:${String(totalMin).padStart(2, '0')}`;
+}
+
+function calculateGreeceTrip() {
+    const t = translations[currentLang];
+    const dest = findDestination(selectedDestKey);
+    if (!dest) return;
+
+    const depTimeInput = document.getElementById("departure-time");
+    if (!depTimeInput || !depTimeInput.value) return;
+    
+    const [depHours, depMinutes] = depTimeInput.value.split(":").map(Number);
+    const fuelConsumption = parseFloat(document.getElementById("fuel-consumption").value) || 0;
+    const fuelPriceEUR = parseFloat(document.getElementById("fuel-price-eur").value) || 0;
+
+    let totalTime = 0;
+    let totalDistance = 0;
+    let speedWarning = false;
+
+    const mDistInput = document.getElementById("gr_makaza-dist");
+    const mSpeedInput = document.getElementById("gr_makaza-speed");
+    if (mDistInput && mSpeedInput) {
+        const mDist = parseFloat(mDistInput.value) || 0;
+        const mSpeed = parseFloat(mSpeedInput.value) || 0;
+        if (mDist > 0 && mSpeed > 0) {
+            totalTime += mDist / mSpeed;
+            totalDistance += mDist;
+            if (mSpeed > 90) speedWarning = true;
+        }
+    }
+
+    const hDistInput = document.getElementById("gr_highway-dist");
+    const hSpeedInput = document.getElementById("gr_highway-speed");
+    if (dest.hasHighway && hDistInput && hSpeedInput) {
+        const hDist = parseFloat(hDistInput.value) || 0;
+        const hSpeed = parseFloat(hSpeedInput.value) || 0;
+        if (hDist > 0 && hSpeed > 0) {
+            totalTime += hDist / hSpeed;
+            totalDistance += hDist;
+            if (hSpeed > dest.highwayAllowed) speedWarning = true;
+        }
+    }
+
+    const lDistInput = document.getElementById("gr_local-dist");
+    const lSpeedInput = document.getElementById("gr_local-speed");
+    if (lDistInput && lSpeedInput) {
+        const lDist = parseFloat(lDistInput.value) || 0;
+        const lSpeed = parseFloat(lSpeedInput.value) || 0;
+        if (lDist > 0 && lSpeed > 0) {
+            totalTime += lDist / lSpeed;
+            totalDistance += lDist;
+            if (lSpeed > dest.localAllowed) speedWarning = true;
+        }
+    }
+
+    let totalFuelLitres = (totalDistance * fuelConsumption) / 100;
+    let totalFuelCostEUR = totalFuelLitres * fuelPriceEUR;
+    let totalFuelCostBGN = totalFuelCostEUR * 1.95583;
+
+    const arrivalTimeFormatted = addMinutesToTime(depHours, depMinutes, totalTime * 60);
+    const totalDurationMinutes = totalTime * 60;
+    const durationHours = Math.floor(totalDurationMinutes / 60);
+    const durationMinutes = Math.round(totalDurationMinutes % 60);
+
+    let resultsHTML = `
+        <h3>${t.resTitle}</h3>
+        <p style="font-size: 17px;"><strong>${t.resArrival} <span style="color: #0275d8;">${arrivalTimeFormatted} ${t.hoursStr}</span></strong></p>
+        <p><strong>${t.resDist}</strong> ${totalDistance.toFixed(1)} км</p>
+        <p><strong>${t.resTime}</strong> ${durationHours} ${t.hoursStr} ${durationMinutes} ${t.minStr}</p>
+        <hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 12px 0;">
+        <p>${t.resFuel} ${totalFuelLitres.toFixed(2)} л</p>
+        <p style="font-size: 16px;"><strong>${t.resPrice} <span style="color: #10b981;">${totalFuelCostEUR.toFixed(2)} €</span> (${totalFuelCostBGN.toFixed(2)} лв.)</strong></p>
+    `;
+
+    if (speedWarning) {
+        resultsHTML += `<div class="warning-box">${t.warning}</div>`;
+    }
+
+    const resultsDiv = document.getElementById("results");
+    if (resultsDiv) {
+        resultsDiv.innerHTML = resultsHTML;
+    }
+}
+
+// Първоначално зареждане
+populateDestinations();
+buildSegmentInputs();
+calculateGreeceTrip();
+</script>
+</body>
+</html>

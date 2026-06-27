@@ -1,0 +1,257 @@
+// === QA ДЕБЪГЕР ===
+window.onerror = function(message, source, lineno, colno, error) {
+    alert("🔴 СЛУЧИ СЕ БЪГ!\n\nГрешка: " + message + "\nРед: " + lineno);
+    return false;
+};
+
+// Координати на ГКПП Маказа за формулата
+const MAKAZA_LAT = 41.2662;
+const MAKAZA_LON = 25.4332;
+
+const translations = {
+    bg: {
+        title: "GR-RouteMaster",
+        lblDepTime: "Час на тръгване от ГКПП Маказа:",
+        lblConsumption: "Среден разход (л / 100 км):",
+        lblPrice: "Цена на горивото за 1 литър (€):",
+        lblDestination: "Избери крайна дестинация:",
+        secTitle: "Маршрут в Гърция",
+        btnText: "Преизчисли",
+        lblDist: "Разстояние (км):",
+        lblSpeed: "Твоята Скорост (км/ч):",
+        lblLimit: "Ограничение",
+        resTitle: "Отчет за пътуването в Гърция:",
+        resArrival: "Очаквано пристигане:",
+        resDist: "Общо разстояние в Гърция:",
+        resTime: "Чисто време в път:",
+        resFuel: "Гориво за гръцката отсечка:",
+        resPrice: "Цена за гориво:",
+        hoursStr: "ч.",
+        minStr: "мин.",
+        warning: "Внимание: Име въведени скорости над ограниченията!",
+        segMakaza: "ГКПП Маказа - Комотини",
+        segHighway: "Магистрала Егнатия Одос",
+        segLocal: "Регионална пътна мрежа"
+    },
+    el: { /* Запазени за превод */ },
+    en: { /* Запазени за превод */ }
+};
+
+const destinationsDatabase = {
+    arogi: { names: { bg: "Плаж Ароги / Фанари" }, hasHighway: false, highwayDist: 0, localDist: 35, localSpeed: 70, localAllowed: 70 },
+    maroneia: { names: { bg: "Маронея" }, hasHighway: false, highwayDist: 0, localDist: 30, localSpeed: 70, localAllowed: 80 },
+    alexandroupoli: { names: { bg: "Александруполис" }, hasHighway: true, highwayDist: 55, highwaySpeed: 120, highwayAllowed: 130, localDist: 10, localSpeed: 50, localAllowed: 50 },
+    kavala: { names: { bg: "Кавала" }, hasHighway: true, highwayDist: 80, highwaySpeed: 120, highwayAllowed: 130, localDist: 15, localSpeed: 60, localAllowed: 60 },
+    keramoti: { names: { bg: "Керамоти" }, hasHighway: true, highwayDist: 75, highwaySpeed: 120, highwayAllowed: 130, localDist: 25, localSpeed: 80, localAllowed: 90 }
+};
+
+let currentLang = 'bg';
+let selectedDestKey = 'arogi';
+
+// --- НОВА ФУНКЦИЯ ЗА GPS ЛОКАЛИЗАЦИЯ (За твоя QA Тест) ---
+function getGPSLocation() {
+    if (!navigator.geolocation) {
+        alert("⚠️ Вашият браузър не поддържа GPS локализация.");
+        return;
+    }
+
+    alert("Сензорът се активира. Моля, разрешете достъпа до локацията, ако телефонът ви попита...");
+
+    navigator.geolocation.getCurrentPosition(
+        function(position) {
+            const userLat = position.coords.latitude;
+            const userLon = position.coords.longitude;
+
+            // Формула на Хаверсин за разстояние между две GPS точки
+            const R = 6371; // Радиус на Земята в км
+            const dLat = (MAKAZA_LAT - userLat) * Math.PI / 180;
+            const dLon = (MAKAZA_LON - userLon) * Math.PI / 180;
+            
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(userLat * Math.PI / 180) * Math.cos(MAKAZA_LAT * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            let distanceAir = R * c; // Разстояние по въздух в км
+            
+            // Добавяме 15% за завои по реалния път
+            let distanceRoad = Math.round(distanceAir * 1.15);
+
+            alert("🎯 Успешно локализиране!\nРазстояние до ГКПП Маказа: около " + distanceRoad + " км по път.");
+        },
+        function(error) {
+            // QA Сценарий: Потребителят е отказал достъп или няма GPS сигнал
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    alert("❌ Отказахте достъп до GPS локацията.");
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    alert("❌ Информацията за локацията е недостъпна (Слаб GPS сигнал).");
+                    break;
+                case error.TIMEOUT:
+                    alert("❌ Времето за заявка изтече преди да се вземе локацията.");
+                    break;
+                default:
+                    alert("❌ Възникна непозната грешка при локализирането.");
+                    break;
+            }
+        }
+    );
+}
+
+function populateDestinations() {
+    const select = document.getElementById("destination-select");
+    if (!select) return;
+    const savedValue = select.value || selectedDestKey;
+    select.innerHTML = "";
+    for (let key in destinationsDatabase) {
+        let opt = document.createElement("option");
+        opt.value = key;
+        opt.innerText = destinationsDatabase[key].names[currentLang] || key;
+        if (key === savedValue) opt.selected = true;
+        select.appendChild(opt);
+    }
+}
+
+function updateDestination() {
+    const select = document.getElementById("destination-select");
+    if (!select) return;
+    selectedDestKey = select.value;
+    buildSegmentInputs();
+    calculateGreeceTrip();
+}
+
+function changeLanguage() { /* Конфигурирана за промяна на езика */ }
+
+function buildSegmentInputs() {
+    const container = document.getElementById("gr-segments-container");
+    if (!container) return;
+    const t = translations[currentLang];
+    const dest = destinationsDatabase[selectedDestKey];
+
+    let html = `
+        <div class="segment">
+            <h4>📍 ${t.segMakaza} (${t.lblLimit}: 90)</h4>
+            <label>${t.lblDist}</label>
+            <input type="number" id="gr_makaza-dist" value="22" oninput="calculateGreeceTrip()">
+            <label>${t.lblSpeed}</label>
+            <input type="number" id="gr_makaza-speed" value="80" oninput="calculateGreeceTrip()">
+        </div>
+    `;
+
+    if (dest.hasHighway) {
+        html += `
+            <div class="segment" style="border-left-color: #eab308;">
+                <h4>🛣️ ${t.segHighway} (${t.lblLimit}: ${dest.highwayAllowed})</h4>
+                <label>${t.lblDist}</label>
+                <input type="number" id="gr_highway-dist" value="${dest.highwayDist}" oninput="calculateGreeceTrip()">
+                <label>${t.lblSpeed}</label>
+                <input type="number" id="gr_highway-speed" value="${dest.highwaySpeed}" oninput="calculateGreeceTrip()">
+            </div>
+        `;
+    }
+
+    html += `
+        <div class="segment" style="border-left-color: #10b981;">
+            <h4>📍 Комотини → ${dest.names[currentLang]} (${t.lblLimit}: ${dest.localAllowed})</h4>
+            <label>${t.lblDist}</label>
+            <input type="number" id="gr_local-dist" value="${dest.localDist}" oninput="calculateGreeceTrip()">
+            <label>${t.lblSpeed}</label>
+            <input type="number" id="gr_local-speed" value="${dest.localSpeed}" oninput="calculateGreeceTrip()">
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+function addMinutesToTime(baseHours, baseMinutes, addedMinutes) {
+    let totalMin = baseMinutes + Math.round(addedMinutes);
+    let totalHr = baseHours + Math.floor(totalMin / 60);
+    totalMin = totalMin % 60;
+    totalHr = totalHr % 24;
+    return `${String(totalHr).padStart(2, '0')}:${String(totalMin).padStart(2, '0')}`;
+}
+
+function calculateGreeceTrip() {
+    const t = translations[currentLang];
+    const dest = destinationsDatabase[selectedDestKey];
+
+    const depTimeInput = document.getElementById("departure-time");
+    if (!depTimeInput || !depTimeInput.value) return;
+    
+    const [depHours, depMinutes] = depTimeInput.value.split(":").map(Number);
+    const fuelConsumption = parseFloat(document.getElementById("fuel-consumption").value) || 0;
+    const fuelPriceEUR = parseFloat(document.getElementById("fuel-price-eur").value) || 0;
+
+    let totalTime = 0;
+    let totalDistance = 0;
+    let speedWarning = false;
+
+    const mDistInput = document.getElementById("gr_makaza-dist");
+    const mSpeedInput = document.getElementById("gr_makaza-speed");
+    if (mDistInput && mSpeedInput) {
+        const mDist = parseFloat(mDistInput.value) || 0;
+        const mSpeed = parseFloat(mSpeedInput.value) || 0;
+        if (mDist > 0 && mSpeed > 0) {
+            totalTime += mDist / mSpeed;
+            totalDistance += mDist;
+            if (mSpeed > 90) speedWarning = true;
+        }
+    }
+
+    const hDistInput = document.getElementById("gr_highway-dist");
+    const hSpeedInput = document.getElementById("gr_highway-speed");
+    if (dest.hasHighway && hDistInput && hSpeedInput) {
+        const hDist = parseFloat(hDistInput.value) || 0;
+        const hSpeed = parseFloat(hSpeedInput.value) || 0;
+        if (hDist > 0 && hSpeed > 0) {
+            totalTime += hDist / hSpeed;
+            totalDistance += hDist;
+            if (hSpeed > dest.highwayAllowed) speedWarning = true;
+        }
+    }
+
+    const lDistInput = document.getElementById("gr_local-dist");
+    const lSpeedInput = document.getElementById("gr_local-speed");
+    if (lDistInput && lSpeedInput) {
+        const lDist = parseFloat(lDistInput.value) || 0;
+        const lSpeed = parseFloat(lSpeedInput.value) || 0;
+        if (lDist > 0 && lSpeed > 0) {
+            totalTime += lDist / lSpeed;
+            totalDistance += lDist;
+            if (lSpeed > dest.localAllowed) speedWarning = true;
+        }
+    }
+
+    let totalFuelLitres = (totalDistance * fuelConsumption) / 100;
+    let totalFuelCostEUR = totalFuelLitres * fuelPriceEUR;
+    let totalFuelCostBGN = totalFuelCostEUR * 1.95583;
+
+    const arrivalTimeFormatted = addMinutesToTime(depHours, depMinutes, totalTime * 60);
+    const totalDurationMinutes = totalTime * 60;
+    const durationHours = Math.floor(totalDurationMinutes / 60);
+    const durationMinutes = Math.round(totalDurationMinutes % 60);
+
+    let resultsHTML = `
+        <h3>${t.resTitle}</h3>
+        <p style="font-size: 17px;"><strong>${t.resArrival} <span style="color: #0275d8;">${arrivalTimeFormatted} ${t.hoursStr}</span></strong></p>
+        <p><strong>${t.resDist}</strong> ${totalDistance.toFixed(1)} км</p>
+        <p><strong>${t.resTime}</strong> ${durationHours} ${t.hoursStr} ${durationMinutes} ${t.minStr}</p>
+        <hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 12px 0;">
+        <p>${t.resFuel} ${totalFuelLitres.toFixed(2)} л</p>
+        <p style="font-size: 16px;"><strong>${t.resPrice} <span style="color: #10b981;">${totalFuelCostEUR.toFixed(2)} €</span> (${totalFuelCostBGN.toFixed(2)} лв.)</strong></p>
+    `;
+
+    if (speedWarning) {
+        resultsHTML += `<div class="warning-box">${t.warning}</div>`;
+    }
+
+    const resultsDiv = document.getElementById("results");
+    if (resultsDiv) {
+        resultsDiv.innerHTML = resultsHTML;
+    }
+}
+
+// Старт
+populateDestinations();
+buildSegmentInputs();
+calculateGreeceTrip();
