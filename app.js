@@ -282,6 +282,7 @@ function calculateGreeceTrip() {
 }
 
 // Стартиране
+GetGPSLocation()
 populateDestinations();
 buildSegmentInputs();
 calculateGreeceTrip();
