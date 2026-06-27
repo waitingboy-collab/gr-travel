@@ -8,6 +8,10 @@ window.onerror = function(message, source, lineno, colno, error) {
 const MAKAZA_LAT = 41.2662;
 const MAKAZA_LON = 25.4332;
 
+// Глобални променливи за отчетената BG локация
+let bgDistanceToMakaza = 0;
+let currentCityName = "";
+
 const translations = {
     bg: {
         title: "GR-RouteMaster",
@@ -20,15 +24,15 @@ const translations = {
         lblDist: "Разстояние (км):",
         lblSpeed: "Твоята Скорост (км/ч):",
         lblLimit: "Ограничение",
-        resTitle: "Отчет за пътуването в Гърция:",
+        resTitle: "Отчет за пътуването:",
         resArrival: "Очаквано пристигане:",
         resDist: "Общо разстояние в Гърция:",
-        resTime: "Чисто време в път:",
+        resTime: "Чисто време в път (в Гърция):",
         resFuel: "Гориво за гръцката отсечка:",
         resPrice: "Цена за гориво:",
         hoursStr: "ч.",
         minStr: "мин.",
-        warning: "Внимание: Име въведени скорости над ограниченията!",
+        warning: "Внимание: Има въведени скорости над ограниченията!",
         segMakaza: "ГКПП Маказа - Комотини",
         segHighway: "Магистрала Егнатия Одос",
         segLocal: "Регионална пътна мрежа"
@@ -48,7 +52,7 @@ const destinationsDatabase = {
 let currentLang = 'bg';
 let selectedDestKey = 'arogi';
 
-// --- НОВА ФУНКЦИЯ ЗА GPS ЛОКАЛИЗАЦИЯ (За твоя QA Тест) ---
+// --- СКОРОСТНА GPS ЛОКАЛИЗАЦИЯ И ГЕОКОДИРАНЕ ---
 function getGPSLocation() {
     if (!navigator.geolocation) {
         alert("⚠️ Вашият браузър не поддържа GPS локализация.");
@@ -74,12 +78,27 @@ function getGPSLocation() {
             let distanceAir = R * c; // Разстояние по въздух в км
             
             // Добавяме 15% за завои по реалния път
-            let distanceRoad = Math.round(distanceAir * 1.15);
+            bgDistanceToMakaza = Math.round(distanceAir * 1.15);
 
-            alert("🎯 Успешно локализиране!\nРазстояние до ГКПП Маказа: около " + distanceRoad + " км по път.");
+            // Онлайн заявка, за да разберем името на града/селото на български
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}&accept-language=bg`)
+                .then(response => response.json())
+                .then(data => {
+                    currentCityName = data.address.city || data.address.town || data.address.village || "Вашата локация";
+                    
+                    alert(`🎯 Успешно локализиране!\n📍 Намирате се в: ${currentCityName}\n🚗 Разстояние до ГКПП Маказа: ~${bgDistanceToMakaza} км.\n\nДанните бяха добавени към общия отчет!`);
+                    
+                    // Преизчисляваме веднага, за да се покаже на екрана
+                    calculateGreeceTrip();
+                })
+                .catch(() => {
+                    // Ако интернетът прекъсне, пак добавяме км, но пишем общо наименование
+                    currentCityName = "Текуща локация";
+                    alert(`🎯 Успешно локализиране!\nРазстояние до ГКПП Маказа: ${bgDistanceToMakaza} км.`);
+                    calculateGreeceTrip();
+                });
         },
         function(error) {
-            // QA Сценарий: Потребителят е отказал достъп или няма GPS сигнал
             switch(error.code) {
                 case error.PERMISSION_DENIED:
                     alert("❌ Отказахте достъп до GPS локацията.");
@@ -88,7 +107,7 @@ function getGPSLocation() {
                     alert("❌ Информацията за локацията е недостъпна (Слаб GPS сигнал).");
                     break;
                 case error.TIMEOUT:
-                    alert("❌ Времето за заявка изтече преди да се вземе локацията.");
+                    alert("❌ Времето за заявка изтече.");
                     break;
                 default:
                     alert("❌ Възникна непозната грешка при локализирането.");
@@ -183,7 +202,7 @@ function calculateGreeceTrip() {
     const fuelPriceEUR = parseFloat(document.getElementById("fuel-price-eur").value) || 0;
 
     let totalTime = 0;
-    let totalDistance = 0;
+    let totalDistanceGreece = 0;
     let speedWarning = false;
 
     const mDistInput = document.getElementById("gr_makaza-dist");
@@ -193,7 +212,7 @@ function calculateGreeceTrip() {
         const mSpeed = parseFloat(mSpeedInput.value) || 0;
         if (mDist > 0 && mSpeed > 0) {
             totalTime += mDist / mSpeed;
-            totalDistance += mDist;
+            totalDistanceGreece += mDist;
             if (mSpeed > 90) speedWarning = true;
         }
     }
@@ -205,7 +224,7 @@ function calculateGreeceTrip() {
         const hSpeed = parseFloat(hSpeedInput.value) || 0;
         if (hDist > 0 && hSpeed > 0) {
             totalTime += hDist / hSpeed;
-            totalDistance += hDist;
+            totalDistanceGreece += hDist;
             if (hSpeed > dest.highwayAllowed) speedWarning = true;
         }
     }
@@ -217,12 +236,16 @@ function calculateGreeceTrip() {
         const lSpeed = parseFloat(lSpeedInput.value) || 0;
         if (lDist > 0 && lSpeed > 0) {
             totalTime += lDist / lSpeed;
-            totalDistance += lDist;
+            totalDistanceGreece += lDist;
             if (lSpeed > dest.localAllowed) speedWarning = true;
         }
     }
 
-    let totalFuelLitres = (totalDistance * fuelConsumption) / 100;
+    // ТУК Е МАГИЯТА: Добавяме километрите от твоя град към гръцките километри
+    let grandTotalDistance = totalDistanceGreece + bgDistanceToMakaza;
+
+    // Смятаме общото гориво и цена за ЦЕЛИЯ маршрут
+    let totalFuelLitres = (grandTotalDistance * fuelConsumption) / 100;
     let totalFuelCostEUR = totalFuelLitres * fuelPriceEUR;
     let totalFuelCostBGN = totalFuelCostEUR * 1.95583;
 
@@ -231,14 +254,26 @@ function calculateGreeceTrip() {
     const durationHours = Math.floor(totalDurationMinutes / 60);
     const durationMinutes = Math.round(totalDurationMinutes % 60);
 
-    let resultsHTML = `
-        <h3>${t.resTitle}</h3>
+    let resultsHTML = `<h3>${t.resTitle}</h3>`;
+
+    // Ако има засечен град, го инжектираме най-отгоре в отчета
+    if (currentCityName !== "") {
+        resultsHTML += `
+            <div style="background-color: #f1f5f9; padding: 10px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #0275d8;">
+                📍 Начална точка: <strong>${currentCityName}</strong><br>
+                🚗 До границата (Маказа): <strong>${bgDistanceToMakaza} км</strong>
+            </div>
+        `;
+    }
+
+    resultsHTML += `
         <p style="font-size: 17px;"><strong>${t.resArrival} <span style="color: #0275d8;">${arrivalTimeFormatted} ${t.hoursStr}</span></strong></p>
-        <p><strong>${t.resDist}</strong> ${totalDistance.toFixed(1)} км</p>
+        <p><strong>Общо разстояние (целия път):</strong> ${grandTotalDistance.toFixed(1)} км</p>
+        <p style="font-size: 13px; color: #64748b; margin-top: -10px;">(от тях в Гърция: ${totalDistanceGreece.toFixed(1)} км)</p>
         <p><strong>${t.resTime}</strong> ${durationHours} ${t.hoursStr} ${durationMinutes} ${t.minStr}</p>
         <hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 12px 0;">
-        <p>${t.resFuel} ${totalFuelLitres.toFixed(2)} л</p>
-        <p style="font-size: 16px;"><strong>${t.resPrice} <span style="color: #10b981;">${totalFuelCostEUR.toFixed(2)} €</span> (${totalFuelCostBGN.toFixed(2)} лв.)</strong></p>
+        <p>Общо гориво за целия маршрут: ${totalFuelLitres.toFixed(2)} л</p>
+        <p style="font-size: 16px;"><strong>Обща цена за гориво: <span style="color: #10b981;">${totalFuelCostEUR.toFixed(2)} €</span> (${totalFuelCostBGN.toFixed(2)} лв.)</strong></p>
     `;
 
     if (speedWarning) {
